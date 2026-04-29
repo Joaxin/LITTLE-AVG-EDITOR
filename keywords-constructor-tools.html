@@ -1,0 +1,1312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JS Object Editor - DB Manager</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: '#6366f1', surface: '#f8fafc' },
+                    animation: {
+                        'fade-in': 'fadeIn 0.3s ease-out',
+                        'fade-in-up': 'fadeInUp 0.3s ease-out',
+                    },
+                    keyframes: {
+                        fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
+                        fadeInUp: { '0%': { opacity: '0', transform: 'translateY(10px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        [v-cloak] {
+            display: none;
+        }
+
+        .no-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        /* 拓扑图文字阴影，增强可读性 */
+        .text-shadow {
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+        }
+    </style>
+</head>
+
+<body class="bg-surface text-slate-800 h-screen flex flex-col overflow-hidden selection:bg-indigo-100">
+    <div id="app" v-cloak class="flex h-full relative">
+
+        <!-- 左侧侧边栏 -->
+        <aside class="hidden md:flex flex-col w-64 bg-white border-r border-slate-200 h-full shadow-sm z-10 flex-none">
+            <div class="p-5 border-b border-slate-100 bg-white">
+                <h1 class="text-lg font-bold text-slate-900 flex items-center gap-2">
+                    <span class="text-xl">📦</span> DB Editor
+                </h1>
+                <p class="text-xs text-slate-400 mt-1">JS Object 结构化编辑器</p>
+                <div class="flex flex-col gap-2 mt-4">
+                    <div class="flex gap-2">
+                        <button @click="triggerFileInput"
+                            class="flex-1 text-xs bg-indigo-50 text-indigo-600 py-1.5 rounded hover:bg-indigo-100 font-medium transition-colors">
+                            导入文件
+                        </button>
+                        <button @click="showExportModal = true"
+                            class="flex-1 text-xs bg-emerald-50 text-emerald-600 py-1.5 rounded hover:bg-emerald-100 font-medium transition-colors">
+                            导出代码
+                        </button>
+                    </div>
+                </div>
+                <input type="file" ref="fileInput" @change="handleFileUpload" class="hidden" accept=".js,.txt">
+            </div>
+
+            <!-- 分类导航列表 -->
+            <nav class="flex-1 overflow-y-auto p-3 space-y-1">
+                <button @click="activeType = 'all'" :class="['w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-all flex justify-between items-center', 
+                         activeType === 'all' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50']">
+                    <span>📑 全部显示</span>
+                    <span class="bg-indigo-100 text-indigo-600 text-[10px] px-1.5 py-0.5 rounded-full">{{ items.length
+                        }}</span>
+                </button>
+
+                <div v-if="Object.keys(groupedItems).length === 0" class="px-4 py-4 text-xs text-slate-400 text-center">
+                    暂无数据，请先导入
+                </div>
+
+                <template v-for="(list, type) in groupedItems" :key="type">
+                    <div class="relative group/item">
+                        <button @click="activeType = type"
+                            :class="['w-full text-left px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-all mt-2 flex justify-between items-center group', 
+                                 activeType === type ? 'bg-white border border-indigo-200 text-indigo-600 shadow-sm' : 'text-slate-500 hover:bg-slate-100 border border-transparent']">
+                            <span class="truncate pr-6">{{ getGroupName(type) }}</span>
+                            <span
+                                class="bg-slate-100 text-slate-400 group-hover:bg-white text-[10px] px-1.5 py-0.5 rounded-full transition-colors">{{
+                                list.length }}</span>
+                        </button>
+                        <!-- 重命名按钮 -->
+                        <button @click.stop="openRenameModal(type)"
+                            class="absolute right-10 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 p-1 text-slate-400 hover:text-indigo-600 transition-all bg-white/80 rounded"
+                            title="重命名分类">
+                            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                        </button>
+                    </div>
+                </template>
+            </nav>
+
+            <div class="p-4 border-t border-slate-100 space-y-3">
+                <button @click="openAddModal"
+                    class="w-full flex items-center justify-center gap-2 text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 py-2.5 rounded-lg shadow-sm transition-all active:scale-95">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                    </svg>
+                    新增条目
+                </button>
+                <div class="flex items-center justify-between px-2 text-[10px] font-medium transition-colors duration-500"
+                    :class="{
+                     'text-slate-400': saveStatus === 'saved',
+                     'text-amber-500': saveStatus === 'unsaved' || saveStatus === 'saving',
+                     'text-red-500': saveStatus === 'error'
+                 }">
+                    <div class="flex items-center gap-1.5">
+                        <span class="relative flex h-2 w-2">
+                            <span v-if="saveStatus !== 'saved'"
+                                class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+                                :class="saveStatus === 'error' ? 'bg-red-400' : 'bg-amber-400'"></span>
+                            <span class="relative inline-flex rounded-full h-2 w-2" :class="{
+                                'bg-slate-300': saveStatus === 'saved',
+                                'bg-amber-500': saveStatus === 'unsaved' || saveStatus === 'saving',
+                                'bg-red-500': saveStatus === 'error'
+                            }"></span>
+                        </span>
+                        <span>
+                            {{ saveStatus === 'saved' ? '已同步至本地' : (saveStatus === 'error' ? '保存失败 (容量超限)' : '自动保存中...')
+                            }}
+                        </span>
+                    </div>
+                    <span v-if="saveStatus === 'saved'" class="text-slate-300">v2.1</span>
+                </div>
+                <button @click="showSettings = true"
+                    class="w-full flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-indigo-600 py-2 rounded hover:bg-slate-50 transition-colors">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                    字段与显示设置
+                </button>
+            </div>
+        </aside>
+
+        <!-- 主内容区域 -->
+        <main class="flex-1 flex flex-col h-full bg-slate-50/50 overflow-hidden relative">
+            <header class="bg-white border-b border-slate-200 px-6 py-3 shadow-sm z-20 flex items-center gap-3">
+
+                <!-- 搜索 -->
+                <div class="relative w-full max-w-md">
+                    <input v-model="searchQuery" type="text" placeholder="🔍 搜索 Key, Title 或 内容..." class="w-full h-10 pl-10 pr-4 bg-slate-100 rounded-lg text-sm
+                         focus:bg-white focus:ring-2 focus:ring-indigo-500 outline-none" />
+                    <div class="absolute left-3 top-2.5 text-slate-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- 关系拓扑 -->
+                <button v-if="items.length > 0" @click="openTopology" class="h-10 px-4 text-sm bg-violet-50 text-violet-600
+                     rounded-lg hover:bg-violet-100 flex items-center gap-1">
+                    🕸️ 关系拓扑图
+                </button>
+
+                <!-- 清空 -->
+                <button v-if="items.length > 0" @click="clearData" class="h-10 px-4 text-sm bg-rose-50 text-rose-600
+                     rounded-lg hover:bg-rose-100 flex items-center gap-1">
+                    🗑️ 清空工作区
+                </button>
+
+            </header>
+
+
+            <div class="flex-1 overflow-y-auto p-4 md:p-8 pb-24 scroll-smooth">
+
+                <div v-if="items.length === 0"
+                    class="flex flex-col items-center justify-center h-full text-slate-400 pb-20">
+                    <div class="text-6xl mb-4 opacity-20">📝</div>
+                    <p class="mb-4 font-medium">请导入 JS 对象文件 或 加载示例</p>
+                    <button @click="loadExample"
+                        class="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">加载示例</button>
+                </div>
+
+                <div v-else class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                    <div v-for="item in filteredItems" :key="item.key"
+                        class="bg-white rounded-xl border border-slate-200 shadow-[0_2px_12px_rgba(0,0,0,0.03)] hover:border-indigo-300 hover:shadow-md transition-all duration-200 flex flex-col overflow-hidden">
+
+                        <!-- 卡片头部 -->
+                        <div
+                            class="bg-slate-50 px-5 py-3 border-b border-slate-100 flex justify-between items-center group">
+                            <div class="flex items-center gap-3 overflow-hidden">
+                                <h3 class="font-mono text-indigo-600 font-bold text-sm truncate" title="Object Key">
+                                    {{ item.key }}
+                                </h3>
+                                <span
+                                    class="bg-slate-200 text-slate-600 text-[10px] px-2 py-0.5 rounded font-mono truncate max-w-[100px]"
+                                    title="ID">
+                                    ID: {{ item.data.id }}
+                                </span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button @click="editingItem = item"
+                                    class="text-slate-400 hover:text-indigo-600 transition-colors p-1" title="全屏专注编辑">
+                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                                    </svg>
+                                </button>
+                                <button @click="deleteItem(item)"
+                                    class="text-slate-400 hover:text-rose-500 transition-colors p-1" title="删除条目">
+                                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                            d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                </button>
+                                <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">
+                                    {{ item.data.type }}
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 卡片内容 (Editable Fields) -->
+                        <div class="p-5 space-y-4 flex-1">
+                            <div v-for="field in config.editableFields" :key="field">
+                                <div v-if="item.data[field] !== undefined">
+                                    <label
+                                        class="block text-[10px] font-bold text-slate-400 uppercase mb-1.5 tracking-wider">{{
+                                        field }}</label>
+
+                                    <textarea v-if="isLongText(item.data[field]) || field === 'desc'"
+                                        :value="decodeNewline(item.data[field])"
+                                        @input="e => updateField(item, field, e.target.value)"
+                                        class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all resize-y min-h-[100px] leading-relaxed"></textarea>
+
+                                    <input v-else :value="item.data[field]"
+                                        @input="e => updateField(item, field, e.target.value)" type="text"
+                                        class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-800 focus:bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all">
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 卡片底部 (Read-only Fields) -->
+                        <div class="bg-slate-50/50 px-5 py-2 border-t border-slate-100 flex flex-wrap gap-2">
+                            <span v-for="(val, key) in item.data" :key="key">
+                                <span v-if="!config.editableFields.includes(key) && key !== 'type' && key !== 'id'"
+                                    class="inline-flex items-center gap-1 text-[10px] text-slate-400 bg-white border border-slate-100 px-2 py-0.5 rounded">
+                                    <span class="opacity-50">{{ key }}:</span> {{ val }}
+                                </span>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="h-10"></div>
+            </div>
+        </main>
+
+        <!-- Modals Section -->
+
+        <!-- 1. 设置弹窗 -->
+        <div v-if="showSettings"
+            class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in-up">
+                <div class="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 class="font-bold text-slate-800">⚙️ 字段设置</h3>
+                    <button @click="showSettings = false" class="text-slate-400 hover:text-slate-600">✕</button>
+                </div>
+                <div class="p-6">
+                    <p class="text-xs text-slate-500 mb-4">勾选你希望在卡片中进行编辑的字段。未勾选的字段将以只读标签形式显示。</p>
+                    <div class="space-y-2 max-h-60 overflow-y-auto">
+                        <label v-for="field in allPossibleFields" :key="field"
+                            class="flex items-center gap-3 p-2 hover:bg-slate-50 rounded cursor-pointer select-none">
+                            <input type="checkbox" :value="field" v-model="config.editableFields"
+                                class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
+                                :disabled="field === 'type' && !hasCategoryConfig">
+                            <span class="text-sm font-medium text-slate-700"
+                                :class="{'opacity-50': field === 'type' && !hasCategoryConfig}">{{ field }}</span>
+
+                            <!-- 提示标签 -->
+                            <span v-if="['title', 'desc'].includes(field)"
+                                class="text-[10px] text-indigo-400 bg-indigo-50 px-1 rounded">推荐</span>
+                            <span v-if="field === 'type' && !hasCategoryConfig"
+                                class="text-[10px] text-slate-400 bg-slate-100 px-1 rounded">单变量模式锁定</span>
+                            <span v-if="field === 'type' && hasCategoryConfig"
+                                class="text-[10px] text-green-600 bg-green-50 px-1 rounded">可编辑</span>
+                        </label>
+                    </div>
+                    <button @click="showSettings = false"
+                        class="w-full mt-6 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors">
+                        完成
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. 导出代码弹窗 -->
+        <div v-if="showExportModal"
+            class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div
+                class="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden animate-fade-in-up">
+                <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                        📤 导出结果
+                    </h3>
+                    <button @click="showExportModal = false" class="text-slate-400 hover:text-slate-600">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="flex-1 bg-slate-800 p-0 overflow-hidden relative group">
+                    <textarea readonly
+                        class="w-full h-full bg-slate-800 text-indigo-100 font-mono text-xs p-6 outline-none resize-none selection:bg-indigo-500/30">{{ generatedCode }}</textarea>
+                    <button @click="copyCode"
+                        class="absolute top-4 right-4 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-lg transition-transform active:scale-95 flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                        </svg>
+                        复制全部代码
+                    </button>
+                </div>
+
+                <div
+                    class="px-6 py-3 bg-slate-50 text-xs text-slate-500 border-t border-slate-100 flex justify-between items-center">
+                    <span>提示: 导出代码已自动按 Type 分组并添加注释，可直接替换原文件内容。</span>
+                    <span v-if="copySuccess" class="text-green-600 font-bold animate-pulse">复制成功!</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. 全屏编辑弹窗 (z-70, 确保在拓扑图之上) -->
+        <div v-if="editingItem" class="fixed inset-0 z-[70] bg-surface flex flex-col animate-fade-in-up">
+            <header
+                class="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-sm flex-none">
+                <div class="flex items-center gap-4">
+                    <button @click="editingItem = null"
+                        class="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition-colors">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                        </svg>
+                    </button>
+                    <div>
+                        <h2 class="text-lg font-bold text-slate-800 font-mono">{{ editingItem.key }}</h2>
+                        <div class="flex gap-2 text-xs text-slate-500">
+                            <span class="bg-slate-100 px-2 py-0.5 rounded">ID: {{ editingItem.data.id }}</span>
+                            <span class="bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded font-bold">{{
+                                editingItem.data.type }}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex gap-3">
+                    <button @click="editingItem = null"
+                        class="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-colors">完成编辑</button>
+                </div>
+            </header>
+
+            <div class="flex-1 overflow-y-auto p-4 md:p-10 max-w-5xl mx-auto w-full">
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-8 space-y-8">
+                    <div v-for="field in config.editableFields" :key="field">
+                        <div v-if="editingItem.data[field] !== undefined">
+                            <label
+                                class="block text-xs font-bold text-slate-400 uppercase mb-2 tracking-wider flex justify-between">
+                                {{ field }}
+                                <span class="text-[10px] font-normal text-slate-300">Markdown 支持</span>
+                            </label>
+
+                            <textarea v-if="isLongText(editingItem.data[field]) || field === 'desc'"
+                                :value="decodeNewline(editingItem.data[field])"
+                                @input="e => updateField(editingItem, field, e.target.value)"
+                                class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg text-base text-slate-700 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all resize-y min-h-[200px] leading-relaxed font-mono"
+                                placeholder="请输入内容..."></textarea>
+
+                            <input v-else :value="editingItem.data[field]"
+                                @input="e => updateField(editingItem, field, e.target.value)" type="text"
+                                class="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-lg text-base font-medium text-slate-800 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50/50 outline-none transition-all">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-8 bg-slate-100 rounded-lg p-4 border border-slate-200">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase mb-3">只读属性</h4>
+                    <div class="flex flex-wrap gap-2">
+                        <template v-for="(val, key) in editingItem.data" :key="key">
+                            <span v-if="!config.editableFields.includes(key) && key !== 'type' && key !== 'id'"
+                                class="inline-flex items-center gap-2 text-xs text-slate-600 bg-white border border-slate-200 px-3 py-1.5 rounded-md shadow-sm">
+                                <span class="opacity-50 font-mono">{{ key }}:</span> {{ val }}
+                            </span>
+                        </template>
+                    </div>
+                </div>
+                <div class="h-20"></div>
+            </div>
+        </div>
+
+        <!-- 4. 新增条目模态框 -->
+        <div v-if="showAddModal"
+            class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in-up">
+                <div class="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 class="font-bold text-slate-800">✨ 新增数据条目</h3>
+                    <button @click="showAddModal = false" class="text-slate-400 hover:text-slate-600">✕</button>
+                </div>
+                <div class="p-6 space-y-4">
+                    <!-- Title -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">Title (名称)</label>
+                        <input v-model="newItemForm.title" type="text" placeholder="e.g. 魔剑·阿波菲斯"
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none">
+                    </div>
+                    <!-- Key with Auto Gen -->
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="block text-xs font-bold text-slate-500">Unique Key (ID)</label>
+                            <button @click="generateId"
+                                class="text-[10px] text-indigo-500 hover:text-indigo-700 flex items-center gap-1 font-bold">
+                                <span class="text-xs">🪄</span> 自动生成
+                            </button>
+                        </div>
+                        <input v-model="newItemForm.key" type="text" placeholder="e.g. magic_sword"
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none font-mono text-slate-700">
+                    </div>
+                    <!-- Category -->
+                    <div>
+                        <label class="block text-xs font-bold text-slate-500 mb-1">Category / Type (分类)</label>
+                        <select v-model="newItemForm.type"
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm focus:border-indigo-500 outline-none appearance-none text-slate-700 font-medium">
+                            <option v-for="(list, type) in groupedItems" :key="type" :value="type">
+                                {{ getGroupName(type) }}
+                            </option>
+                            <option disabled>──────────</option>
+                            <option value="NEW_TYPE">+ 手动输入新分类...</option>
+                        </select>
+                        <!-- Manual Input -->
+                        <div v-if="newItemForm.type === 'NEW_TYPE'" class="mt-2 animate-fade-in">
+                            <input v-model="newItemForm.customType" type="text" placeholder="输入全大写分类名..."
+                                class="w-full px-3 py-2 bg-indigo-50 border border-indigo-200 rounded text-xs font-bold text-indigo-700 outline-none uppercase placeholder-indigo-300"
+                                @input="e => e.target.value = e.target.value.toUpperCase()">
+                        </div>
+                    </div>
+                    <button @click="addItem"
+                        class="w-full mt-4 py-2.5 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200 flex justify-center items-center gap-2">
+                        <span>确认创建</span>
+                        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 5. 分类重命名模态框 (双变量增强版) -->
+        <div v-if="showRenameModal"
+            class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div class="bg-white rounded-xl shadow-xl w-full max-w-sm overflow-hidden animate-fade-in-up">
+                <div class="px-5 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                    <h3 class="font-bold text-slate-800">🏷️ 编辑分类</h3>
+                    <button @click="showRenameModal = false" class="text-slate-400 hover:text-slate-600">✕</button>
+                </div>
+                <div class="p-6">
+                    <!-- 双变量模式: 编辑 Key 和 Label -->
+                    <div v-if="hasCategoryConfig && categoryConfig">
+                        <div class="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                            <span class="text-xs text-slate-400 block mb-1">当前分类对象</span>
+                            <div class="font-mono text-xs text-slate-600 break-all">
+                                "{{ renameForm.oldType }}": { label: "{{ categoryConfig[renameForm.oldType]?.label || ''
+                                }}", ... }
+                            </div>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 mb-1">Category Key (代码键名)</label>
+                                <input v-model="renameForm.newType" type="text"
+                                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm font-bold text-indigo-600 focus:border-indigo-500 outline-none uppercase font-mono"
+                                    placeholder="WORLD">
+                                <p class="text-[10px] text-slate-400 mt-1">修改此项将同时迁移所有归属此类的条目。</p>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-bold text-slate-500 mb-1">Category Label (显示名称)</label>
+                                <input v-model="renameForm.newLabel" type="text"
+                                    class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm font-medium text-slate-700 focus:border-indigo-500 outline-none"
+                                    placeholder="世界">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 单变量模式: 仅编辑 Key -->
+                    <div v-else>
+                        <p class="text-xs text-slate-500 mb-4">
+                            将所有属于 <span class="font-bold text-slate-700 bg-slate-100 px-1 rounded">{{ renameForm.oldType
+                                }}</span> 的条目批量迁移到新分类：
+                        </p>
+                        <input v-model="renameForm.newType" @keyup.enter="confirmRename" type="text"
+                            class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded text-sm font-bold text-indigo-600 focus:border-indigo-500 outline-none uppercase"
+                            placeholder="NEW_CATEGORY_NAME">
+                    </div>
+
+                    <div class="flex gap-2 mt-6">
+                        <button @click="showRenameModal = false"
+                            class="flex-1 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-sm hover:bg-slate-50 transition-colors">取消</button>
+                        <button @click="confirmRename"
+                            class="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-200">确认修改</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 6. 拓扑视图模态框 (全屏 z-60) -->
+        <div v-if="showTopologyModal"
+            class="fixed inset-0 bg-slate-900 z-[60] flex flex-col overflow-hidden animate-fade-in">
+            <div
+                class="bg-slate-800 px-6 py-3 border-b border-slate-700 flex justify-between items-center shadow-md z-10">
+                <h3 class="font-bold text-white flex items-center gap-2">
+                    <span class="text-xl">🕸️</span> 数据拓扑 (Topology)
+                </h3>
+                <div class="flex items-center gap-4">
+                    <div class="text-xs text-slate-400 flex items-center gap-2">
+                        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-indigo-500"></span>
+                            分类节点</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-white"></span> 数据条目
+                            (双击编辑 / 拖拽归类)</span>
+                    </div>
+                    <button @click="showTopologyModal = false"
+                        class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded text-xs transition-colors">退出视图</button>
+                </div>
+            </div>
+
+            <div class="flex-1 relative bg-slate-900 overflow-hidden cursor-move" @mousedown="panStart"
+                @mousemove="panMove" @mouseup="panEnd" @wheel="handleZoom">
+                <!-- 背景网格：修复了移动时的空白问题 -->
+                <div class="absolute inset-0 opacity-10 pointer-events-none" :style="{ 
+                    backgroundImage: 'radial-gradient(#6366f1 1px, transparent 1px)', 
+                    backgroundPosition: `${view.x}px ${view.y}px`,
+                    backgroundSize: `${20 * view.scale}px ${20 * view.scale}px`
+                 }">
+                </div>
+
+                <!-- SVG 容器保持全屏静止，内部 Group 进行变换 -->
+                <svg class="w-full h-full absolute top-0 left-0">
+                    <g :style="{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }">
+                        <!-- 连线 -->
+                        <line v-for="link in graph.links" :key="link.id" :x1="link.source.x" :y1="link.source.y"
+                            :x2="link.target.x" :y2="link.target.y" stroke="#475569" stroke-width="1" opacity="0.4" />
+
+                        <!-- 拖拽时的动态连线 -->
+                        <line v-if="draggingNode" :x1="draggingNode.x" :y1="draggingNode.y"
+                            :x2="dragTarget ? dragTarget.x : draggingNode.originX"
+                            :y2="dragTarget ? dragTarget.y : draggingNode.originY" stroke="#818cf8" stroke-width="2"
+                            stroke-dasharray="4" class="animate-pulse" />
+
+                        <!-- 分类节点 (Drop Zone) -->
+                        <g v-for="node in graph.categories" :key="node.id" class="transition-all duration-300"
+                            :class="dragTarget && dragTarget.id === node.id ? 'opacity-100 scale-110' : 'opacity-90'">
+                            <circle :cx="node.x" :cy="node.y" :r="node.r" fill="#1e293b" stroke="#6366f1"
+                                stroke-width="2" class="drop-shadow-lg" />
+                            <circle :cx="node.x" :cy="node.y" :r="node.r + 20" fill="transparent"
+                                stroke="transparent" /> <!-- 扩大感应区 -->
+                            <text :x="node.x" :y="node.y" dy="40" text-anchor="middle" fill="#94a3b8" font-size="12"
+                                font-weight="bold" class="pointer-events-none select-none text-shadow">{{ node.label
+                                }}</text>
+                            <text :x="node.x" :y="node.y" dy="5" text-anchor="middle" fill="#ffffff" font-size="16"
+                                font-weight="bold" class="pointer-events-none select-none text-shadow">{{ node.count
+                                }}</text>
+                        </g>
+
+                        <!-- 数据节点 (Draggable) -->
+                        <g v-for="node in graph.items" :key="node.id" @mousedown.stop="nodeDragStart($event, node)"
+                            @dblclick.stop="editFromTopology(node)"
+                            class="cursor-grab active:cursor-grabbing hover:opacity-100 transition-opacity group"
+                            :style="{ opacity: draggingNode && draggingNode.id === node.id ? 0 : 1 }">
+                            <circle :cx="node.x" :cy="node.y" r="5" :fill="node.color" stroke="#0f172a"
+                                stroke-width="1" />
+                            <circle :cx="node.x" :cy="node.y" r="15" fill="transparent" /> <!-- 扩大点击区域 -->
+
+                            <!-- 永久显示的名称标签 -->
+                            <text :x="node.x" :y="node.y" dy="18" text-anchor="middle" fill="#cbd5e1" font-size="10"
+                                class="pointer-events-none select-none opacity-70 group-hover:opacity-100 transition-opacity bg-black/50 text-shadow"
+                                style="text-shadow: 0 0 2px black;">{{ node.title }}</text>
+
+                            <title>双击编辑: {{ node.title }} ({{ node.key }})</title>
+                        </g>
+                    </g> <!-- End of Transform Group -->
+
+                    <!-- 正在拖拽的替身节点 (绝对定位在鼠标位置) -->
+                    <g v-if="draggingNode" class="pointer-events-none">
+                        <circle :cx="realMouseX" :cy="realMouseY" r="8" fill="#ffffff" stroke="#6366f1" stroke-width="2"
+                            class="drop-shadow-xl z-50" />
+                        <text :x="realMouseX" :y="realMouseY" dy="-15" text-anchor="middle" fill="white" font-size="10"
+                            class="bg-black/50 px-2 rounded">{{ draggingNode.title }}</text>
+                    </g>
+                </svg>
+
+                <div
+                    class="absolute bottom-4 left-4 text-slate-500 text-xs bg-slate-800/80 px-3 py-2 rounded border border-slate-700 pointer-events-none select-none">
+                    🖱️ 滚轮缩放 / 左键拖拽画布 / 拖动小白点归类 / 双击小白点编辑
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, watch, reactive } = Vue;
+
+        createApp({
+            setup() {
+                // === 1. 状态定义 ===
+                const items = ref([]);
+                const activeType = ref('all');
+                const searchQuery = ref('');
+                const showSettings = ref(false);
+                const showExportModal = ref(false);
+                const copySuccess = ref(false);
+                const editingItem = ref(null);
+                const fileInput = ref(null);
+
+                // 核心：分类配置与标记
+                const categoryConfig = ref(null);
+                const hasCategoryConfig = ref(false);
+
+                // 模态框状态
+                const showAddModal = ref(false);
+                const newItemForm = reactive({ key: '', type: 'CONCEPT', title: '', customType: '' });
+                const showRenameModal = ref(false);
+                const renameForm = reactive({ oldType: '', newType: '', newLabel: '' });
+
+                // 字段配置
+                const config = ref({
+                    editableFields: ['title', 'desc'],
+                });
+
+                // 持久化
+                const STORAGE_KEY = 'JS_DB_EDITOR_CACHE_V2_1';
+                let saveTimeout = null;
+                const saveStatus = ref('saved');
+
+                // --- Topology States ---
+                const showTopologyModal = ref(false);
+                const view = reactive({ x: 0, y: 0, scale: 1, isPanning: false, lastX: 0, lastY: 0 });
+                const graph = reactive({ categories: [], items: [], links: [] });
+                const draggingNode = ref(null);
+                const dragTarget = ref(null);
+                const mouseX = ref(0);
+                const mouseY = ref(0);
+                const realMouseX = ref(0);
+                const realMouseY = ref(0);
+
+                // === 2. 辅助逻辑 ===
+
+                // 获取分类显示名称
+                const getGroupName = (key) => {
+                    if (categoryConfig.value && categoryConfig.value[key]) {
+                        return `${categoryConfig.value[key].label} (${key})`;
+                    }
+                    return key;
+                };
+
+                // ID 自动生成
+                const generateId = () => {
+                    let candidate = '';
+                    if (newItemForm.title) {
+                        candidate = newItemForm.title.trim().toLowerCase()
+                            .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+                    }
+                    const exists = (k) => items.value.some(i => i.key === k);
+                    if (!candidate || exists(candidate)) {
+                        if (candidate && !exists(candidate + '_1')) candidate += '_1';
+                        else candidate = 'id_' + Math.random().toString(36).substr(2, 6);
+                    }
+                    newItemForm.key = candidate;
+                };
+
+                const isLongText = (val) => {
+                    if (typeof val !== 'string') return false;
+                    return val.length > 40 || val.includes('\n');
+                };
+
+                const decodeNewline = (str) => str;
+                const updateField = (item, field, newVal) => item.data[field] = newVal;
+
+                // === 3. 核心操作 (增删改) ===
+
+                const openAddModal = () => {
+                    newItemForm.key = ''; newItemForm.title = ''; newItemForm.customType = '';
+                    newItemForm.type = activeType.value !== 'all' ? activeType.value : (Object.keys(groupedItems.value)[0] || 'CONCEPT');
+                    showAddModal.value = true;
+                };
+
+                const addItem = () => {
+                    const key = newItemForm.key.trim();
+                    if (!key) return alert("Key 不能为空");
+                    if (items.value.some(i => i.key === key)) return alert("Key 已存在");
+
+                    let finalType = newItemForm.type;
+
+                    // 增强型分类处理逻辑
+                    if (hasCategoryConfig.value && categoryConfig.value) {
+                        // 1. 如果用户选择了现有的 Category Key (如 "WORLD")
+                        if (categoryConfig.value[finalType]) {
+                            const catDef = categoryConfig.value[finalType];
+                            // 自动选择该分类下的第一个 Type，若无则使用 Category Key 本身并注册
+                            if (catDef.types && catDef.types.length > 0) {
+                                finalType = catDef.types[0];
+                            } else {
+                                if (!catDef.types) catDef.types = [];
+                                catDef.types.push(finalType);
+                            }
+                        }
+                        // 2. 如果用户手动输入了新类型 (NEW_TYPE)
+                        else if (newItemForm.type === 'NEW_TYPE') {
+                            const customType = newItemForm.customType ? newItemForm.customType.trim().toUpperCase() : 'CONCEPT';
+                            finalType = customType;
+
+                            // 尝试将新类型添加到当前激活的分类中
+                            const currentContextCat = activeType.value !== 'all' ? activeType.value : null;
+
+                            if (currentContextCat && categoryConfig.value[currentContextCat]) {
+                                // 添加到当前分类
+                                if (!categoryConfig.value[currentContextCat].types.includes(finalType)) {
+                                    categoryConfig.value[currentContextCat].types.push(finalType);
+                                }
+                            } else {
+                                // 如果没有激活分类，创建一个新的分类定义
+                                if (!categoryConfig.value[finalType]) {
+                                    categoryConfig.value[finalType] = { label: finalType, types: [finalType] };
+                                }
+                            }
+                        }
+                    } else {
+                        // 原有单变量模式逻辑
+                        if (finalType === 'NEW_TYPE') {
+                            finalType = newItemForm.customType ? newItemForm.customType.trim().toUpperCase() : 'CONCEPT';
+                        }
+                    }
+
+                    items.value.unshift({
+                        key: key,
+                        data: {
+                            id: key, type: finalType,
+                            title: newItemForm.title || key,
+                            desc: '', unlocked: false
+                        }
+                    });
+                    showAddModal.value = false;
+
+                    // 只有在单变量模式下才切换 activeType
+                    if (!hasCategoryConfig.value && activeType.value !== 'all') {
+                        activeType.value = finalType;
+                    }
+                };
+
+                const deleteItem = (item) => {
+                    if (confirm(`删除 "${item.key}"？`)) {
+                        const idx = items.value.findIndex(i => i.key === item.key);
+                        if (idx !== -1) items.value.splice(idx, 1);
+                        if (showTopologyModal.value) initGraphLayout(); // 刷新拓扑
+                    }
+                };
+
+                const openRenameModal = (type) => {
+                    renameForm.oldType = type;
+                    renameForm.newType = type;
+                    // 如果存在分类配置，预填 Label
+                    if (hasCategoryConfig.value && categoryConfig.value && categoryConfig.value[type]) {
+                        renameForm.newLabel = categoryConfig.value[type].label;
+                    } else {
+                        renameForm.newLabel = '';
+                    }
+                    showRenameModal.value = true;
+                };
+
+                const confirmRename = () => {
+                    const oldT = renameForm.oldType;
+                    const newT = renameForm.newType.trim();
+                    const newL = renameForm.newLabel ? renameForm.newLabel.trim() : '';
+
+                    if (!newT) return alert("Category Key cannot be empty");
+
+                    // [MOD] 双变量模式下，重命名的是分类容器 (Key in LORE_CATEGORIES) 及 Label
+                    if (hasCategoryConfig.value && categoryConfig.value) {
+                        if (categoryConfig.value[oldT]) {
+                            // 1. 如果 Key 变了
+                            if (newT !== oldT) {
+                                if (categoryConfig.value[newT]) return alert("Target Category Key already exists!");
+                                // 迁移配置
+                                categoryConfig.value[newT] = categoryConfig.value[oldT];
+                                delete categoryConfig.value[oldT];
+                            }
+
+                            // 2. 更新 Label
+                            if (newL) {
+                                categoryConfig.value[newT].label = newL;
+                            }
+
+                            // 3. 更新当前视图
+                            if (activeType.value === oldT) {
+                                activeType.value = newT;
+                            }
+
+                            showRenameModal.value = false;
+                            if (showTopologyModal.value) initGraphLayout(); // 刷新拓扑
+                            return;
+                        }
+                    }
+
+                    // 单变量模式: 批量修改 Item 数据
+                    if (newT !== oldT) {
+                        items.value.forEach(item => {
+                            if (item.data.type === oldT) {
+                                item.data.type = newT;
+                            }
+                        });
+                        if (activeType.value === oldT) {
+                            activeType.value = newT;
+                        }
+                    }
+
+                    showRenameModal.value = false;
+                    if (showTopologyModal.value) initGraphLayout(); // 刷新拓扑
+                };
+
+                const clearData = () => {
+                    if (confirm('⚠️ 确定要清空所有数据吗？\n\n此操作将清除工作区和本地缓存，无法撤销。')) {
+                        items.value = [];
+                        categoryConfig.value = null;
+                        hasCategoryConfig.value = false;
+                        localStorage.removeItem(STORAGE_KEY);
+                        activeType.value = 'all';
+                        if (showTopologyModal.value) showTopologyModal.value = false;
+                    }
+                };
+
+                // === 4. 数据解析与处理 ===
+
+                const parseJSObject = (content) => {
+                    try {
+                        const varNames = [];
+                        const varRegex = /(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=/g;
+                        let match;
+                        while ((match = varRegex.exec(content)) !== null) {
+                            varNames.push(match[1]);
+                        }
+
+                        if (varNames.length === 0) throw new Error("未找到有效的变量定义");
+
+                        const returnStr = varNames.map(n => `${n}: ${n}`).join(', ');
+                        const func = new Function(`
+                        ${content}
+                        return { ${returnStr} };
+                    `);
+                        const result = func();
+
+                        let db = null;
+                        let cats = null;
+
+                        // 智能识别 DB 和 Config 变量
+                        const isDBLike = (obj) => {
+                            if (!obj || typeof obj !== 'object') return false;
+                            const keys = Object.keys(obj);
+                            if (keys.length === 0) return false;
+                            const first = obj[keys[0]];
+                            return first && typeof first === 'object' && ('id' in first || 'type' in first || 'title' in first);
+                        };
+
+                        if (varNames.length >= 2) {
+                            const v0 = result[varNames[0]];
+                            const v1 = result[varNames[1]];
+
+                            if (isDBLike(v1)) {
+                                db = v1;
+                                cats = v0;
+                            } else {
+                                db = v0;
+                                cats = v1;
+                            }
+                            hasCategoryConfig.value = true;
+                        } else {
+                            db = result[varNames[0]];
+                            hasCategoryConfig.value = false;
+                        }
+
+                        if (!db) throw new Error("无法解析数据库对象");
+
+                        categoryConfig.value = cats || null;
+
+                        if (hasCategoryConfig.value) {
+                            if (!config.value.editableFields.includes('type')) {
+                                config.value.editableFields.push('type');
+                            }
+                        } else {
+                            config.value.editableFields = config.value.editableFields.filter(f => f !== 'type');
+                        }
+
+                        const parsedItems = Object.entries(db).map(([key, data]) => ({
+                            key,
+                            data
+                        }));
+
+                        items.value = parsedItems;
+                        detectBestEditableFields(parsedItems);
+                        activeType.value = 'all';
+
+                        return true;
+                    } catch (e) {
+                        console.error(e);
+                        alert("解析失败: " + e.message);
+                        return false;
+                    }
+                };
+
+                const detectBestEditableFields = (itemList) => {
+                    if (itemList.length === 0) return;
+                    const candidates = new Map();
+                    itemList.slice(0, 5).forEach(item => {
+                        Object.entries(item.data).forEach(([k, v]) => {
+                            if (typeof v === 'string') {
+                                const currentMax = candidates.get(k) || 0;
+                                if (v.length > currentMax) candidates.set(k, v.length);
+                            }
+                        });
+                    });
+                    candidates.forEach((len, key) => {
+                        if (len > 30 && !config.value.editableFields.includes(key) && key !== 'id' && key !== 'type') {
+                            config.value.editableFields.push(key);
+                        }
+                    });
+                };
+
+                const triggerFileInput = () => fileInput.value.click();
+
+                const handleFileUpload = (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => parseJSObject(ev.target.result);
+                    reader.readAsText(file);
+                };
+
+                const loadExample = () => {
+                    const exampleDataRaw = `
+const LORE_CATEGORIES = {
+    "WORLD": { label: "世界", types: ["LOCATION", "HISTORY"] },
+    "TECH": { label: "技术", types: ["TECH"] }
+    };
+    const KEYWORDS_DB = {
+    "iris": { id: "iris", type: "LOCATION", title: "IRIS", desc: "示例数据...", unlocked: true },
+    "chip": { id: "chip", type: "TECH", title: "Quantum Chip", desc: "示例数据...", unlocked: false }
+    };`;
+                    parseJSObject(exampleDataRaw);
+                };
+
+                // === 5. Topology Logic ===
+
+                const openTopology = () => {
+                    initGraphLayout();
+                    const width = window.innerWidth;
+                    const height = window.innerHeight;
+                    view.x = width / 2;
+                    view.y = height / 2;
+                    view.scale = 0.8;
+                    showTopologyModal.value = true;
+                };
+
+                const initGraphLayout = () => {
+                    graph.categories = [];
+                    graph.items = [];
+                    graph.links = [];
+
+                    const cats = categoryConfig.value ? Object.keys(categoryConfig.value) : Object.keys(groupedItems.value);
+                    const activeCats = cats.filter(c => c !== 'ALL');
+
+                    // 1. 布局分类节点 (环形布局)
+                    const radius = 300;
+                    const angleStep = (2 * Math.PI) / (activeCats.length || 1);
+
+                    activeCats.forEach((catKey, i) => {
+                        const angle = i * angleStep;
+                        const cx = activeCats.length <= 1 ? 0 : Math.cos(angle) * radius;
+                        const cy = activeCats.length <= 1 ? 0 : Math.sin(angle) * radius;
+
+                        const label = categoryConfig.value && categoryConfig.value[catKey] ? categoryConfig.value[catKey].label : catKey;
+                        const relatedItems = groupedItems.value[catKey] || [];
+
+                        const catNode = {
+                            id: catKey,
+                            label: label,
+                            x: cx,
+                            y: cy,
+                            r: 30,
+                            count: relatedItems.length,
+                            types: categoryConfig.value ? categoryConfig.value[catKey].types : [catKey]
+                        };
+                        graph.categories.push(catNode);
+
+                        // 2. 布局子节点 (卫星布局)
+                        const itemRadius = 100; // 略微增加半径
+                        const itemStep = (2 * Math.PI) / (relatedItems.length || 1);
+
+                        relatedItems.forEach((item, j) => {
+                            const itemAngle = j * itemStep + angle;
+                            const jitter = Math.random() * 30 - 15; // 增加抖动
+                            const ix = cx + Math.cos(itemAngle) * (itemRadius + jitter);
+                            const iy = cy + Math.sin(itemAngle) * (itemRadius + jitter);
+
+                            const itemNode = {
+                                id: item.key,
+                                key: item.key,
+                                title: item.data.title || item.key,
+                                x: ix,
+                                y: iy,
+                                originX: ix,
+                                originY: iy,
+                                parentId: catKey,
+                                color: getColorForType(item.data.type),
+                                data: item // 绑定完整数据供双击使用
+                            };
+                            graph.items.push(itemNode);
+                            graph.links.push({ id: `${catKey}-${item.key}`, source: catNode, target: itemNode });
+                        });
+                    });
+                };
+
+                const getColorForType = (type) => {
+                    const colors = ['#f87171', '#fbbf24', '#34d399', '#60a5fa', '#a78bfa', '#f472b6', '#e879f9', '#2dd4bf'];
+                    let hash = 0;
+                    for (let i = 0; i < type.length; i++) hash = type.charCodeAt(i) + ((hash << 5) - hash);
+                    return colors[Math.abs(hash) % colors.length];
+                };
+
+                // 画布交互
+                const panStart = (e) => {
+                    if (draggingNode.value) return;
+                    view.isPanning = true;
+                    view.lastX = e.clientX;
+                    view.lastY = e.clientY;
+                };
+                const panMove = (e) => {
+                    // 更新鼠标坐标
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    // 逻辑坐标
+                    mouseX.value = (e.clientX - rect.left - view.x) / view.scale;
+                    mouseY.value = (e.clientY - rect.top - view.y) / view.scale;
+                    // 真实坐标 (用于渲染替身)
+                    realMouseX.value = e.clientX - rect.left;
+                    realMouseY.value = e.clientY - rect.top;
+
+                    if (draggingNode.value) {
+                        checkDragTarget();
+                        return;
+                    }
+
+                    if (view.isPanning) {
+                        const dx = e.clientX - view.lastX;
+                        const dy = e.clientY - view.lastY;
+                        view.x += dx;
+                        view.y += dy;
+                        view.lastX = e.clientX;
+                        view.lastY = e.clientY;
+                    }
+                };
+                const panEnd = () => {
+                    view.isPanning = false;
+                    if (draggingNode.value) {
+                        handleDrop();
+                        draggingNode.value = null;
+                        dragTarget.value = null;
+                    }
+                };
+                const handleZoom = (e) => {
+                    e.preventDefault();
+                    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+                    view.scale = Math.min(Math.max(0.1, view.scale * delta), 5);
+                };
+
+                // 节点拖拽
+                const nodeDragStart = (e, node) => {
+                    // 防止同时触发双击
+                    if (e.detail > 1) return;
+
+                    draggingNode.value = node;
+                    const svgRect = e.target.closest('.flex-1').getBoundingClientRect();
+                    view.isPanning = false;
+
+                    mouseX.value = (e.clientX - svgRect.left - view.x) / view.scale;
+                    mouseY.value = (e.clientY - svgRect.top - view.y) / view.scale;
+                    realMouseX.value = e.clientX - svgRect.left;
+                    realMouseY.value = e.clientY - svgRect.top;
+                };
+
+                const checkDragTarget = () => {
+                    let closest = null;
+                    let minDesc = 60;
+
+                    graph.categories.forEach(cat => {
+                        const dx = mouseX.value - cat.x;
+                        const dy = mouseY.value - cat.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < minDesc) {
+                            closest = cat;
+                        }
+                    });
+                    dragTarget.value = closest;
+                };
+
+                const handleDrop = () => {
+                    if (dragTarget.value && draggingNode.value && dragTarget.value.id !== draggingNode.value.parentId) {
+                        const itemKey = draggingNode.value.key;
+                        const newCatKey = dragTarget.value.id;
+
+                        const item = items.value.find(i => i.key === itemKey);
+                        if (item) {
+                            let newType = newCatKey;
+                            if (hasCategoryConfig.value && categoryConfig.value[newCatKey]) {
+                                const types = categoryConfig.value[newCatKey].types;
+                                newType = types.length > 0 ? types[0] : newCatKey;
+                            }
+                            item.data.type = newType;
+                            initGraphLayout();
+                        }
+                    }
+                };
+
+                // 双击节点编辑
+                const editFromTopology = (node) => {
+                    const item = items.value.find(i => i.key === node.key);
+                    if (item) {
+                        editingItem.value = item;
+                    }
+                };
+
+                // === 6. 计算属性 ===
+
+                // 分组逻辑
+                const groupedItems = computed(() => {
+                    const groups = {};
+                    const list = items.value;
+
+                    if (categoryConfig.value) {
+                        const usedKeys = new Set();
+                        Object.entries(categoryConfig.value).forEach(([catKey, catDef]) => {
+                            if (catKey === 'ALL') return;
+                            const targetTypes = catDef.types || [];
+                            const matches = list.filter(item => targetTypes.includes(item.data.type));
+                            if (matches.length > 0) {
+                                groups[catKey] = matches;
+                                matches.forEach(m => usedKeys.add(m.key));
+                            }
+                        });
+                        const leftovers = list.filter(item => !usedKeys.has(item.key));
+                        if (leftovers.length > 0) {
+                            groups['UNCATEGORIZED'] = leftovers;
+                        }
+                    } else {
+                        list.forEach(item => {
+                            const t = item.data.type || 'UNCATEGORIZED';
+                            if (!groups[t]) groups[t] = [];
+                            groups[t].push(item);
+                        });
+                    }
+                    return groups;
+                });
+
+                // 过滤显示
+                const filteredItems = computed(() => {
+                    let list = [];
+                    if (activeType.value === 'all') {
+                        list = items.value;
+                    } else {
+                        list = groupedItems.value[activeType.value] || [];
+                    }
+                    if (searchQuery.value) {
+                        const q = searchQuery.value.toLowerCase();
+                        list = list.filter(i =>
+                            i.key.toLowerCase().includes(q) ||
+                            (i.data.title && i.data.title.toLowerCase().includes(q)) ||
+                            (i.data.desc && i.data.desc.toLowerCase().includes(q))
+                        );
+                    }
+                    return list;
+                });
+
+                const allPossibleFields = computed(() => {
+                    const fields = new Set();
+                    items.value.forEach(item => {
+                        Object.keys(item.data).forEach(k => fields.add(k));
+                    });
+                    fields.add('type');
+                    fields.delete('id');
+                    return Array.from(fields);
+                });
+
+                const generatedCode = computed(() => {
+                    if (items.value.length === 0) return '';
+                    let code = '';
+
+                    if (categoryConfig.value) {
+                        code += `const LORE_CATEGORIES = ${JSON.stringify(categoryConfig.value, null, 4)};\n\n`;
+                    }
+
+                    code += `const KEYWORDS_DB = {\n`;
+                    for (const type in groupedItems.value) {
+                        const label = categoryConfig.value && categoryConfig.value[type]
+                            ? categoryConfig.value[type].label
+                            : type;
+                        code += `    // === ${label} ===\n`;
+
+                        groupedItems.value[type].forEach(item => {
+                            code += `    "${item.key}": {\n`;
+                            const keys = Object.keys(item.data);
+                            keys.forEach((k, idx) => {
+                                let val = item.data[k];
+                                let formattedVal;
+                                if (typeof val === 'string') {
+                                    const escaped = val.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"');
+                                    formattedVal = `"${escaped}"`;
+                                } else {
+                                    formattedVal = val;
+                                }
+                                code += `        ${k}: ${formattedVal}`;
+                                if (idx < keys.length - 1) code += `,`;
+                                code += `\n`;
+                            });
+                            code += `    },\n`;
+                        });
+                        code += `\n`;
+                    }
+                    code += `};`;
+                    return code;
+                });
+
+                const copyCode = () => {
+                    navigator.clipboard.writeText(generatedCode.value).then(() => {
+                        copySuccess.value = true;
+                        setTimeout(() => copySuccess.value = false, 2000);
+                    });
+                };
+
+                // === 7. 生命周期与监听 ===
+
+                onMounted(() => {
+                    const cached = localStorage.getItem(STORAGE_KEY);
+                    if (cached) {
+                        try {
+                            const parsed = JSON.parse(cached);
+                            if (parsed.items && parsed.items.length > 0) {
+                                items.value = parsed.items;
+                                categoryConfig.value = parsed.categoryConfig || null;
+                                hasCategoryConfig.value = !!categoryConfig.value;
+                                if (parsed.config) {
+                                    config.value = { ...config.value, ...parsed.config };
+                                }
+                            }
+                        } catch (e) {
+                            localStorage.removeItem(STORAGE_KEY);
+                        }
+                    }
+
+                    window.addEventListener('beforeunload', (e) => {
+                        if (items.value.length > 0) {
+                            e.preventDefault();
+                            e.returnValue = '您有未保存的数据，确定要离开吗？';
+                        }
+                    });
+                });
+
+                watch([items, categoryConfig, config], ([newItems, newCats, newConfig]) => {
+                    saveStatus.value = 'unsaved';
+                    if (saveTimeout) clearTimeout(saveTimeout);
+                    saveTimeout = setTimeout(() => {
+                        if (newItems.length > 0) {
+                            saveStatus.value = 'saving';
+                            try {
+                                localStorage.setItem(STORAGE_KEY, JSON.stringify({ items: newItems, categoryConfig: newCats, config: newConfig }));
+                                setTimeout(() => saveStatus.value = 'saved', 500);
+                            } catch (e) { saveStatus.value = 'error'; }
+                        } else { saveStatus.value = 'saved'; }
+                    }, 1000);
+                }, { deep: true });
+
+                return {
+                    items, activeType, searchQuery, showSettings, showExportModal, config,
+                    groupedItems, filteredItems, allPossibleFields,
+                    triggerFileInput, fileInput, handleFileUpload, loadExample,
+                    isLongText, decodeNewline, updateField, editingItem, clearData, saveStatus,
+                    generatedCode, copyCode, copySuccess, getGroupName,
+                    showAddModal, newItemForm, openAddModal, addItem, deleteItem, generateId,
+                    showRenameModal, renameForm, openRenameModal, confirmRename, hasCategoryConfig, categoryConfig,
+                    // Topology
+                    showTopologyModal, openTopology, view, graph, panStart, panMove, panEnd, handleZoom, nodeDragStart, draggingNode, dragTarget, mouseX, mouseY, realMouseX, realMouseY, editFromTopology
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+
+</html>
